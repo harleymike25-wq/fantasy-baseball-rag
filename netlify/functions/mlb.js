@@ -1,8 +1,14 @@
 const MLB_BASE = "https://statsapi.mlb.com/api/v1";
 
+const fetchWithTimeout = (url, ms = 4000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
 async function searchPlayer(name) {
   // Use hydrate=currentTeam in a single call instead of two round trips
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${MLB_BASE}/people/search?names=${encodeURIComponent(name)}&sportId=1&hydrate=currentTeam`
   );
   const data = await res.json();
@@ -11,7 +17,7 @@ async function searchPlayer(name) {
 
 async function getSeasonStats(playerId, season, position) {
   const group = ["SP", "RP", "P"].includes(position) ? "pitching" : "hitting";
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${MLB_BASE}/people/${playerId}/stats?stats=season&season=${season}&sportId=1&group=${group}`
   );
   const data = await res.json();
@@ -19,7 +25,7 @@ async function getSeasonStats(playerId, season, position) {
 }
 
 async function getRecentGameLog(playerId, season) {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${MLB_BASE}/people/${playerId}/stats?stats=gameLog&season=${season}&sportId=1&group=hitting,pitching`
   );
   const data = await res.json();
@@ -28,7 +34,7 @@ async function getRecentGameLog(playerId, season) {
 }
 
 async function getSchedule(date) {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${MLB_BASE}/schedule?sportId=1&date=${date}&hydrate=probablePitcher,venue,weather`
   );
   const data = await res.json();
@@ -54,7 +60,7 @@ async function getTodaySchedule() {
 }
 
 async function getPitcherStats(playerId, season) {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${MLB_BASE}/people/${playerId}/stats?stats=season&season=${season}&sportId=1&group=pitching`
   );
   const data = await res.json();
@@ -62,7 +68,7 @@ async function getPitcherStats(playerId, season) {
 }
 
 async function getPlatoonSplits(playerId, season) {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${MLB_BASE}/people/${playerId}/stats?stats=statSplits&season=${season}&sportId=1&group=hitting&sitCodes=vl,vr`
   );
   const data = await res.json();
@@ -73,7 +79,7 @@ async function getPlatoonSplits(playerId, season) {
 }
 
 async function getBatterVsPitcher(batterId, pitcherId) {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${MLB_BASE}/people/${batterId}/stats?stats=vsPlayer&opposingPlayerId=${pitcherId}&group=hitting&sportId=1`
   );
   const data = await res.json();

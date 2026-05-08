@@ -72,9 +72,12 @@ exports.handler = async (event) => {
   }
 
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(
-      `https://api.openweathermap.org/data/2.5/weather?lat=${coords.lat}&lon=${coords.lon}&appid=${apiKey}&units=imperial`
-    );
+      `https://api.openweathermap.org/data/2.5/weather?lat=${coords.lat}&lon=${coords.lon}&appid=${apiKey}&units=imperial`,
+      { signal: controller.signal }
+    ).finally(() => clearTimeout(timer));
     const data = await res.json();
 
     return {
