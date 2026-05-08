@@ -27,39 +27,56 @@ function loadStatcast() {
   }
 }
 
+// ── Parse roster string into { slot, name, team } entries ───────────────────
+function parseRoster(roster) {
+  if (!roster) return [];
+  // Format: "SP_1: Framber Valdez (HOU), C_1: Will Smith (LAD), ..."
+  return roster.split(",").map((entry) => {
+    const m = entry.trim().match(/^(\w+):\s*(.+?)\s*\(([^)]+)\)$/);
+    if (!m) return null;
+    return { slot: m[1], name: m[2].trim(), team: m[3].trim() };
+  }).filter(Boolean);
+}
+
 // ── Extract player names from message + roster ───────────────────────────────
 function extractPlayerNames(messages, roster) {
   const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  const msgLower = lastUserMsg.toLowerCase();
 
-  // Collect known roster names for cross-reference
-  const rosterNames = [];
-  if (roster) {
-    const matches = roster.match(/[A-Z][a-z]+ [A-Z][a-z]+/g) ?? [];
-    rosterNames.push(...matches);
-  }
-
-  // Words that look like player names (capitalized, 2+ chars) in the user message
-  const words = lastUserMsg.match(/\b[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?\b/g) ?? [];
-
-  // Also check lowercase tokens against roster last names
-  const tokens = lastUserMsg.toLowerCase().split(/\W+/);
-  for (const rn of rosterNames) {
-    const last = rn.split(" ").pop().toLowerCase();
-    if (tokens.includes(last) && !words.includes(rn)) {
-      words.push(rn);
-    }
-  }
-
-  // Deduplicate, skip common non-name words
-  const stopWords = new Set(["Should", "Start", "Sit", "Today", "Tomorrow", "Who", "What", "How", "Can", "The", "And", "For"]);
+  const rosterEntries = parseRoster(roster);
   const seen = new Set();
   const names = [];
-  for (const w of words) {
-    if (!stopWords.has(w) && !seen.has(w)) {
-      seen.add(w);
-      names.push(w);
+  const add = (name) => { if (!seen.has(name)) { seen.add(name); names.push(name); } };
+
+  // Detect pitcher-specific questions — only pull SP/RP slots
+  const pitcherIntent = /\bpitcher|sp\b|start.*pitch|pitch.*start/i.test(lastUserMsg);
+  const batterIntent = /\bbatter|hitter|bench|lineup|position player/i.test(lastUserMsg);
+
+  const relevantEntries = pitcherIntent && !batterIntent
+    ? rosterEntries.filter((e) => e.slot.startsWith("SP") || e.slot.startsWith("RP") || e.slot.startsWith("P"))
+    : batterIntent && !pitcherIntent
+    ? rosterEntries.filter((e) => !e.slot.startsWith("SP") && !e.slot.startsWith("RP"))
+    : rosterEntries;
+
+  // Match roster players by full name or last name appearing in message
+  for (const { name } of relevantEntries) {
+    const last = name.split(" ").pop().toLowerCase();
+    const first = name.split(" ")[0].toLowerCase();
+    if (msgLower.includes(last) || msgLower.includes(first)) {
+      add(name);
     }
   }
+
+  // For general pitcher/batter questions with no specific names, don't auto-fetch —
+  // let the caller fall back to schedule + roster context instead
+
+  // Also catch capitalized names not on roster
+  const stopWords = new Set(["Should", "Start", "Sit", "Today", "Tomorrow", "Who", "What", "How", "Can", "The", "And", "For", "Kenny", "Powers"]);
+  const capWords = lastUserMsg.match(/\b[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?\b/g) ?? [];
+  for (const w of capWords) {
+    if (!stopWords.has(w)) add(w);
+  }
+
   return names;
 }
 
@@ -81,9 +98,10 @@ async function fetchPlayerContext(names, statcastCache) {
       const playerId = pd.player?.id;
       const statcast = playerId ? (statcastCache[playerId] ?? null) : null;
 
+      const isPitcher = ["SP", "RP", "P"].includes(pd.player?.position);
       const [weather, odds] = await Promise.all([
         venue ? getWeather(venue).catch(() => null) : Promise.resolve(null),
-        team ? getPlayerOdds(null, team).catch(() => null) : Promise.resolve(null),
+        (!isPitcher && team) ? getPlayerOdds(null, team).catch(() => null) : Promise.resolve(null),
       ]);
 
       return { ...pd, weather, odds, statcast };
@@ -94,18 +112,20 @@ async function fetchPlayerContext(names, statcastCache) {
 }
 
 // ── System prompt ────────────────────────────────────────────────────────────
-function buildSystemPrompt(roster, playerContext) {
+function buildSystemPrompt(roster, playerContext, scheduleContext) {
   const rosterBlock = roster
     ? `\n\n<my_roster>${roster}</my_roster>\nThe above is the user's current fantasy roster. Use it for context in all decisions.`
     : "";
 
   const dataBlock = playerContext
     ? `\n\n<player_data>${JSON.stringify(playerContext, null, 2)}</player_data>\nThe above is real-time data fetched for the players in this question. Use it — do not recall stats from memory.`
+    : scheduleContext
+    ? `\n\n<schedule>${JSON.stringify(scheduleContext, null, 2)}</schedule>\nThe above is today's and tomorrow's MLB schedule with probable pitchers and venues. Cross-reference it against <my_roster> to identify which of the user's pitchers are starting today, their opponent, and venue. Use this to make start/sit recommendations.`
     : "";
 
   return `You are Kenny Powers — the foul-mouthed, wildly overconfident, trash-talking former MLB pitcher from Eastbound & Down. You give expert fantasy baseball advice but deliver it exactly like Kenny Powers would: profane, self-aggrandizing, brutally honest, with zero filter. You refer to yourself in the third person occasionally, insult weak pitchers and bad matchups like they personally offended you, and treat every start/sit decision like it's a matter of personal honor. Stay in character at all times.${rosterBlock}${dataBlock}
 
-Never fabricate statistics. Use only the data provided in <player_data>. If a field is missing, say so briefly and move on.
+Never fabricate statistics. Use only data provided in <player_data> or <schedule>. If detailed stats aren't available, give your best recommendation based on matchup, opponent, and venue — do NOT ask the user to provide data. Just work with what you've got and own it.
 
 For EVERY player start/sit writeup include these sections:
 1. 📊 Score: [X]/100 — [START / LEAN START / NEUTRAL / LEAN SIT / SIT]
@@ -134,8 +154,18 @@ exports.handler = async (event) => {
   try {
     const statcastCache = loadStatcast();
     const names = extractPlayerNames(messages, roster);
-    const playerContext = names.length ? await fetchPlayerContext(names, statcastCache) : null;
-    const system = buildSystemPrompt(roster, playerContext);
+
+    let playerContext = null;
+    let scheduleContext = null;
+
+    if (names.length) {
+      playerContext = await fetchPlayerContext(names, statcastCache);
+    } else {
+      const { today, tomorrow } = await getTodayAndTomorrowSchedule();
+      scheduleContext = { today, tomorrow };
+    }
+
+    const system = buildSystemPrompt(roster, playerContext, scheduleContext);
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
