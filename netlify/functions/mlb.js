@@ -80,7 +80,7 @@ async function getBatterVsPitcher(batterId, pitcherId) {
   return data.stats?.[0]?.splits?.[0]?.stat ?? null;
 }
 
-async function getPlayerData(playerName) {
+async function getPlayerData(playerName, schedule) {
   const currentSeason = new Date().getFullYear();
   const player = await searchPlayer(playerName);
   if (!player) return { error: `Player not found: ${playerName}` };
@@ -88,10 +88,15 @@ async function getPlayerData(playerName) {
   const position = player.primaryPosition?.abbreviation;
   const teamName = player.currentTeam?.name?.toLowerCase() ?? "";
 
+  // Use pre-fetched schedule if provided, otherwise fetch it
+  const schedulePromise = schedule
+    ? Promise.resolve(schedule)
+    : getTodayAndTomorrowSchedule();
+
   const [seasonStats, recentLog, { today: todayGames, tomorrow: tomorrowGames }] = await Promise.all([
     getSeasonStats(player.id, currentSeason, position),
     getRecentGameLog(player.id, currentSeason),
-    getTodayAndTomorrowSchedule(),
+    schedulePromise,
   ]);
 
   function findGame(games) {

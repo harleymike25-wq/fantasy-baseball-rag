@@ -84,8 +84,11 @@ function extractPlayerNames(messages, roster) {
 async function fetchPlayerContext(names, statcastCache) {
   if (!names.length) return null;
 
+  // Fetch schedule once, share across all player lookups
+  const schedule = await getTodayAndTomorrowSchedule().catch(() => ({ today: [], tomorrow: [] }));
+
   const playerDataList = await Promise.all(
-    names.map((n) => getPlayerData(n).catch((e) => ({ error: e.message, name: n })))
+    names.map((n) => getPlayerData(n, schedule).catch((e) => ({ error: e.message, name: n })))
   );
 
   // Fetch weather + odds in parallel for players that have a game
