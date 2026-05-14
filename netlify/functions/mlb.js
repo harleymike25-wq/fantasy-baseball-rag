@@ -195,3 +195,5 @@ exports.handler = async (event) => {
 module.exports.getPlayerData = getPlayerData;
 module.exports.getTodaySchedule = getTodaySchedule;
 module.exports.getTodayAndTomorrowSchedule = getTodayAndTomorrowSchedule;
+module.exports.searchPlayer = searchPlayer;
+module.exports.getSeasonStats = getSeasonStats;
