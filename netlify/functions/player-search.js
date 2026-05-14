@@ -8,7 +8,7 @@ exports.handler = async (event) => {
 
   try {
     const res = await fetch(
-      `${MLB_BASE}/people/search?names=${encodeURIComponent(query)}&sportId=1&limit=8`
+      `${MLB_BASE}/people/search?names=${encodeURIComponent(query)}&sportId=1&limit=8&hydrate=currentTeam`
     );
     const data = await res.json();
 

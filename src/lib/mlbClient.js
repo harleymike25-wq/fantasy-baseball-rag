@@ -33,8 +33,8 @@ export async function getTodayAndTomorrowSchedule() {
   const tomorrow = new Date(today);
   tomorrow.setDate(today.getDate() + 1);
   const [t, tm] = await Promise.all([
-    mlbGet(`/schedule?sportId=1&date=${fmt(today)}&hydrate=probablePitcher,venue`),
-    mlbGet(`/schedule?sportId=1&date=${fmt(tomorrow)}&hydrate=probablePitcher,venue`),
+    mlbGet(`/schedule?sportId=1&date=${fmt(today)}&hydrate=probablePitcher,venue,weather`),
+    mlbGet(`/schedule?sportId=1&date=${fmt(tomorrow)}&hydrate=probablePitcher,venue,weather`),
   ]);
   return {
     today: t.dates?.[0]?.games ?? [],
@@ -74,12 +74,20 @@ export async function buildPlayerData(player, schedule) {
     const pitcher = isHome
       ? game.teams?.away?.probablePitcher
       : game.teams?.home?.probablePitcher;
+    const w = game.weather;
     todayGame = {
       when,
       opponent: (isHome ? game.teams?.away : game.teams?.home)?.team?.name,
       venue: game.venue?.name,
       probablePitcher: pitcher
         ? { name: pitcher.fullName, throws: pitcher.pitchHand?.code }
+        : null,
+      weather: w
+        ? {
+            temp: w.temp ? `${w.temp}°F` : null,
+            wind: w.wind,
+            condition: w.condition,
+          }
         : null,
     };
   }
