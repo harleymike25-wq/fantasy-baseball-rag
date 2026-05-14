@@ -52,9 +52,10 @@ body {
 .header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 0 18px;
-  height: 54px;
+  min-height: 54px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border);
   font-size: 15px;
@@ -63,7 +64,19 @@ body {
   flex-shrink: 0;
 }
 
-.header select {
+.header__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.header__team-row {
+  display: flex;
+  align-items: center;
+}
+
+.header__team-select {
   background: var(--bg-input);
   border: 1px solid var(--border-hi);
   border-radius: 8px;
@@ -74,7 +87,48 @@ body {
   outline: none;
   transition: border-color 0.15s;
 }
-.header select:focus { border-color: var(--accent); }
+.header__team-select:focus { border-color: var(--accent); }
+
+.header__no-team {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.header__nav {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Mobile: brand + nav share the first row; team dropdown fills second row */
+@media (max-width: 480px) {
+  .header {
+    padding: 10px 14px;
+    row-gap: 8px;
+    column-gap: 0;
+  }
+
+  .header__brand {
+    font-size: 14px;
+    order: 1;
+  }
+
+  .header__nav {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .header__team-row {
+    order: 3;
+    width: 100%;
+    flex-basis: 100%;
+    padding-bottom: 4px;
+  }
+
+  .header__team-select {
+    width: 100%;
+  }
+}
 
 /* ── Chat messages ──────────────────────────────────── */
 .chat-scroll {
