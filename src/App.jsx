@@ -13,25 +13,17 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <span>⚾</span>
-        <span>Fantasy Baseball AI</span>
+        <div className="header__brand">
+          <span>⚾</span>
+          <span>Fantasy Baseball AI</span>
+        </div>
 
-        {/* Team dropdown visible on both tabs */}
-        <div style={{ marginLeft: 12, display: "flex", alignItems: "center", gap: 6 }}>
+        <div className="header__team-row">
           {teams.length > 0 ? (
             <select
               value={activeTeamId ?? ""}
               onChange={(e) => setActiveTeamId(e.target.value || null)}
-              style={{
-                background: "#1e293b",
-                border: "1px solid #334155",
-                borderRadius: 6,
-                color: activeTeam ? "#e2e8f0" : "#64748b",
-                fontSize: 13,
-                padding: "4px 8px",
-                cursor: "pointer",
-                outline: "none",
-              }}
+              className="header__team-select"
             >
               {!activeTeamId && <option value="">— select team —</option>}
               {teams.map((t) => (
@@ -39,11 +31,11 @@ function App() {
               ))}
             </select>
           ) : (
-            <span style={{ fontSize: 12, color: "#475569" }}>No teams yet</span>
+            <span className="header__no-team">No teams yet</span>
           )}
         </div>
 
-        <nav style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+        <nav className="header__nav">
           {["chat", "roster"].map((t) => (
             <button
               key={t}
