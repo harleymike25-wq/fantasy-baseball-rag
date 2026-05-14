@@ -2,7 +2,12 @@ const { default: Anthropic } = require("@anthropic-ai/sdk");
 const path = require("path");
 const fs = require("fs");
 
-const { getPlayerData, getTodayAndTomorrowSchedule, searchPlayer, getSeasonStats } = require("./mlb");
+const {
+  getTodayAndTomorrowSchedule,
+  searchPlayer,
+  getSeasonStats,
+  getRecentGameLog,
+} = require("./mlb");
 const { getWeather } = require("./weather");
 
 const client = new Anthropic();
@@ -36,24 +41,85 @@ function parseRoster(rosterStr) {
 
 const KENNY_VOICE = `You are Kenny Powers — the foul-mouthed, wildly overconfident, trash-talking former MLB pitcher from Eastbound & Down. You give expert fantasy baseball advice delivered exactly like Kenny Powers would: profane, self-aggrandizing, brutally honest, zero filter. Stay in character at all times. Never fabricate statistics — use only data provided to you.`;
 
+// ── Light player fetch: ~3 API calls total (search + stats + log), no pitcher lookup ──
+async function fetchPlayerLight(name, schedule, statcastCache) {
+  const player = await searchPlayer(name);
+  if (!player) return { error: `Player not found: ${name}`, name };
+
+  const season = new Date().getFullYear();
+  const position = player.primaryPosition?.abbreviation;
+  const teamName = player.currentTeam?.name?.toLowerCase() ?? "";
+
+  const [seasonStats, recentLog] = await Promise.all([
+    getSeasonStats(player.id, season, position).catch(() => []),
+    getRecentGameLog(player.id, season).catch(() => []),
+  ]);
+
+  // Find game from already-fetched schedule — no extra API call
+  function findGame(games) {
+    if (!teamName) return undefined;
+    return games.find(
+      (g) =>
+        g.teams?.away?.team?.name?.toLowerCase().includes(teamName) ||
+        g.teams?.home?.team?.name?.toLowerCase().includes(teamName)
+    );
+  }
+
+  const todayGame = findGame(schedule.today);
+  const tomorrowGame = findGame(schedule.tomorrow);
+  const nextGame = todayGame ?? tomorrowGame;
+  const nextGameDay = todayGame ? "today" : tomorrowGame ? "tomorrow" : null;
+
+  let todayGameInfo = null;
+  if (nextGame) {
+    const isHome = nextGame.teams?.home?.team?.name?.toLowerCase().includes(teamName);
+    const opp = isHome ? nextGame.teams?.away : nextGame.teams?.home;
+    const pitcher = isHome
+      ? nextGame.teams?.away?.probablePitcher
+      : nextGame.teams?.home?.probablePitcher;
+
+    todayGameInfo = {
+      when: nextGameDay,
+      opponent: opp?.team?.name,
+      venue: nextGame.venue?.name,
+      // Pitcher name + handedness from schedule — no extra API call needed
+      probablePitcher: pitcher
+        ? { name: pitcher.fullName, throws: pitcher.pitchHand?.code }
+        : null,
+    };
+  }
+
+  return {
+    player: {
+      id: player.id,
+      name: player.fullName,
+      team: player.currentTeam?.name ?? "Free Agent",
+      position,
+      bats: player.batSide?.code,
+    },
+    seasonStats: seasonStats?.[0]?.splits?.[0]?.stat ?? {},
+    recentLog: recentLog.slice(-7).map((g) => ({ date: g.date, opponent: g.opponent?.name, stat: g.stat })),
+    statcast: player.id ? (statcastCache[player.id] ?? null) : null,
+    todayGame: todayGameInfo,
+  };
+}
+
 // ── Start / Sit ───────────────────────────────────────────────────────────────
 async function handleStartSit(players, roster, statcastCache) {
   const schedule = await getTodayAndTomorrowSchedule().catch(() => ({ today: [], tomorrow: [] }));
 
-  const raw = await Promise.all(
-    players.map((p) => getPlayerData(p.name, schedule).catch(() => ({ error: "not found", name: p.name })))
+  // Fetch both players in parallel — light fetch only (~3 calls each)
+  const playerData = await Promise.all(
+    players.map((p) => fetchPlayerLight(p.name, schedule, statcastCache).catch((e) => ({ error: e.message, name: p.name })))
   );
 
+  // Fetch weather for each player's venue in parallel
   const enriched = await Promise.all(
-    raw.map(async (pd) => {
+    playerData.map(async (pd) => {
       if (pd.error) return pd;
       const venue = pd.todayGame?.venue;
-      const playerId = pd.player?.id;
-      const [weather, statcast] = await Promise.all([
-        venue ? getWeather(venue).catch(() => null) : Promise.resolve(null),
-        Promise.resolve(playerId ? (statcastCache[playerId] ?? null) : null),
-      ]);
-      return { ...pd, weather, statcast };
+      const weather = venue ? await getWeather(venue).catch(() => null) : null;
+      return { ...pd, weather };
     })
   );
 
@@ -62,15 +128,13 @@ async function handleStartSit(players, roster, statcastCache) {
 <my_roster>${roster}</my_roster>
 <player_data>${JSON.stringify(enriched, null, 2)}</player_data>
 
-For EACH player give exactly these sections:
+For EACH player give:
 1. 📊 Score: [X]/100 — [START / LEAN START / NEUTRAL / LEAN SIT / SIT]
 2. Season stats: AVG/OPS/HR/RBI/SB or ERA/WHIP/K9
-3. Last 7 days: hot or cold streak with highlights
-4. Matchup: opposing pitcher name, ERA, WHIP, handedness
-5. Platoon edge: splits vs L/R — favorable or not
-6. History vs pitcher: career AB, AVG, HR
-7. Weather: temp, wind, indoor/outdoor
-8. Statcast: xBA, barrel%, hard hit%
+3. Last 7 days: hot or cold streak
+4. Matchup: opponent, probable pitcher name & handedness
+5. Weather: temp, wind, indoor/outdoor
+6. Statcast: xBA, barrel%, hard hit% (if available)
 
 End with a clear final verdict on who to start.`;
 
@@ -93,7 +157,7 @@ async function handleTrade(give, get, roster) {
       const seasonStats = await getSeasonStats(found.id, season, position).catch(() => []);
       return {
         name: found.fullName,
-        team: found.currentTeam?.name,
+        team: found.currentTeam?.name ?? "Free Agent",
         position,
         age: found.currentAge,
         stats: seasonStats?.[0]?.splits?.[0]?.stat ?? {},
@@ -124,11 +188,12 @@ End with a clear verdict: ACCEPT / DECLINE / COUNTER (and if counter, suggest wh
 }
 
 // ── Waiver Wire ───────────────────────────────────────────────────────────────
-async function handleWaiver(candidates, position, roster) {
+async function handleWaiver(candidates, position, roster, statcastCache) {
   const schedule = await getTodayAndTomorrowSchedule().catch(() => ({ today: [], tomorrow: [] }));
 
+  // Light fetch for each candidate — same fast path as start/sit
   const playerData = await Promise.all(
-    candidates.map((p) => getPlayerData(p.name, schedule).catch(() => ({ error: "not found", name: p.name })))
+    candidates.map((p) => fetchPlayerLight(p.name, schedule, statcastCache).catch((e) => ({ error: e.message, name: p.name })))
   );
 
   const system = `${KENNY_VOICE}
@@ -141,7 +206,7 @@ Rank each candidate with:
 1. 📋 Pick Priority: #1, #2, etc.
 2. Season stats
 3. Recent form (last 7 days)
-4. Schedule outlook (upcoming matchups)
+4. Upcoming matchup
 5. Verdict: pick up or pass and why
 
 End with a clear #1 recommendation.`;
@@ -166,7 +231,7 @@ async function handleRosterCheck(roster) {
       return {
         slot,
         name: found.fullName,
-        team: found.currentTeam?.name,
+        team: found.currentTeam?.name ?? "Free Agent",
         position,
         age: found.currentAge,
         stats: seasonStats?.[0]?.splits?.[0]?.stat ?? {},
@@ -201,7 +266,7 @@ exports.handler = async (event) => {
   const { mode, roster } = body;
 
   try {
-    const statcastCache = mode === "start-sit" ? loadStatcast() : {};
+    const statcastCache = (mode === "start-sit" || mode === "waiver") ? loadStatcast() : {};
     let systemPrompt, userMsg;
 
     switch (mode) {
@@ -220,7 +285,7 @@ exports.handler = async (event) => {
       case "waiver": {
         const { candidates, position } = body;
         if (!candidates?.length) return { statusCode: 400, body: JSON.stringify({ error: "Add at least one candidate" }) };
-        ({ system: systemPrompt, userMsg } = await handleWaiver(candidates, position, roster));
+        ({ system: systemPrompt, userMsg } = await handleWaiver(candidates, position, roster, statcastCache));
         break;
       }
       case "roster-check": {
@@ -234,7 +299,7 @@ exports.handler = async (event) => {
 
     const response = await client.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 2048,
+      max_tokens: 1200,
       system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userMsg }],
     });

@@ -198,3 +198,4 @@ module.exports.getTodaySchedule = getTodaySchedule;
 module.exports.getTodayAndTomorrowSchedule = getTodayAndTomorrowSchedule;
 module.exports.searchPlayer = searchPlayer;
 module.exports.getSeasonStats = getSeasonStats;
+module.exports.getRecentGameLog = getRecentGameLog;
