@@ -41,12 +41,15 @@ function salvageRecipes(jsonStr) {
     if (inString) continue;
 
     if (c === '{') {
-      if (depth === 1) start = i;
+      if (depth === 0) start = i;
       depth++;
     } else if (c === '}') {
       depth--;
-      if (depth === 1 && start !== -1) {
-        try { recipes.push(JSON.parse(jsonStr.slice(start, i + 1))); } catch { /* skip malformed */ }
+      if (depth === 0 && start !== -1) {
+        try {
+          const obj = JSON.parse(jsonStr.slice(start, i + 1));
+          if (obj.name && obj.ingredients) recipes.push(obj);
+        } catch { /* skip malformed */ }
         start = -1;
       }
     }
@@ -116,9 +119,9 @@ async function ingest() {
     const batch = recipes.slice(i, i + 20);
     const { error } = await supabase.from("recipes").insert(batch);
     if (error) console.error(`Batch error:`, error.message);
-    else { inserted += batch.length; process.stdout.write(`\r${inserted}/${recipes.length} inserted`); }
+    else { inserted += batch.length; console.log(`${inserted}/${recipes.length} inserted`); }
   }
-  console.log(`\nDone! ${inserted}/${recipes.length} recipes ingested.`);
+  console.log(`Done! ${inserted}/${recipes.length} recipes ingested.`);
 }
 
 ingest().catch((err) => { console.error("Fatal:", err.message); process.exit(1); });
