@@ -106,6 +106,7 @@ async function getPlayerData(playerName, schedule) {
   ]);
 
   function findGame(games) {
+    if (!teamName) return undefined;
     return games.find(
       (g) =>
         g.teams?.away?.team?.name?.toLowerCase().includes(teamName) ||

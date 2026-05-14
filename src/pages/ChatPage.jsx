@@ -74,19 +74,39 @@ export default function ChatPage({ rosterSummary, roster }) {
     setLoading(true);
     setResult(null);
     setError(null);
+
+    const timeoutMs = payload.mode === "roster-check" ? 28000 : 16000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...payload, roster: rosterSummary }),
+        signal: controller.signal,
       });
+
+      // Non-JSON response means Netlify returned an error/timeout page
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        throw new Error(
+          `Server error (${res.status}) — analysis may have timed out. Try again.`
+        );
+      }
+
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setResult(data.reply);
     } catch (err) {
-      setError(err.message);
+      setError(
+        err.name === "AbortError"
+          ? "Request timed out — try again or use fewer players."
+          : err.message
+      );
       setResult(null);
     } finally {
+      clearTimeout(timer);
       setLoading(false);
     }
   }
