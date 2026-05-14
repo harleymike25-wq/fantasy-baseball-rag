@@ -51,7 +51,7 @@ function App() {
       {tab === "roster" ? (
         <RosterPage teamHook={teamHook} />
       ) : (
-        <ChatPage rosterSummary={teamHook.getRosterSummary()} />
+        <ChatPage rosterSummary={teamHook.getRosterSummary()} roster={teamHook.roster} />
       )}
     </div>
   );
