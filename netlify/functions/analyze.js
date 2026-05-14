@@ -1,13 +1,6 @@
 const { default: Anthropic } = require("@anthropic-ai/sdk");
 const path = require("path");
 const fs = require("fs");
-
-const {
-  getTodayAndTomorrowSchedule,
-  searchPlayer,
-  getSeasonStats,
-  getRecentGameLog,
-} = require("./mlb");
 const { getWeather } = require("./weather");
 
 const client = new Anthropic();
@@ -30,98 +23,30 @@ function loadStatcast() {
   }
 }
 
-function parseRoster(rosterStr) {
-  if (!rosterStr) return [];
-  return rosterStr.split(",").map((entry) => {
-    const m = entry.trim().match(/^(\w+):\s*(.+?)\s*\(([^)]+)\)$/);
-    if (!m) return null;
-    return { slot: m[1], name: m[2].trim(), team: m[3].trim() };
-  }).filter(Boolean);
-}
-
 const KENNY_VOICE = `You are Kenny Powers — the foul-mouthed, wildly overconfident, trash-talking former MLB pitcher from Eastbound & Down. You give expert fantasy baseball advice delivered exactly like Kenny Powers would: profane, self-aggrandizing, brutally honest, zero filter. Stay in character at all times. Never fabricate statistics — use only data provided to you.`;
 
-// ── Light player fetch: ~3 API calls total (search + stats + log), no pitcher lookup ──
-async function fetchPlayerLight(name, schedule, statcastCache) {
-  const player = await searchPlayer(name);
-  if (!player) return { error: `Player not found: ${name}`, name };
-
-  const season = new Date().getFullYear();
-  const position = player.primaryPosition?.abbreviation;
-  const teamName = player.currentTeam?.name?.toLowerCase() ?? "";
-
-  const [seasonStats, recentLog] = await Promise.all([
-    getSeasonStats(player.id, season, position).catch(() => []),
-    getRecentGameLog(player.id, season).catch(() => []),
-  ]);
-
-  // Find game from already-fetched schedule — no extra API call
-  function findGame(games) {
-    if (!teamName) return undefined;
-    return games.find(
-      (g) =>
-        g.teams?.away?.team?.name?.toLowerCase().includes(teamName) ||
-        g.teams?.home?.team?.name?.toLowerCase().includes(teamName)
-    );
-  }
-
-  const todayGame = findGame(schedule.today);
-  const tomorrowGame = findGame(schedule.tomorrow);
-  const nextGame = todayGame ?? tomorrowGame;
-  const nextGameDay = todayGame ? "today" : tomorrowGame ? "tomorrow" : null;
-
-  let todayGameInfo = null;
-  if (nextGame) {
-    const isHome = nextGame.teams?.home?.team?.name?.toLowerCase().includes(teamName);
-    const opp = isHome ? nextGame.teams?.away : nextGame.teams?.home;
-    const pitcher = isHome
-      ? nextGame.teams?.away?.probablePitcher
-      : nextGame.teams?.home?.probablePitcher;
-
-    todayGameInfo = {
-      when: nextGameDay,
-      opponent: opp?.team?.name,
-      venue: nextGame.venue?.name,
-      // Pitcher name + handedness from schedule — no extra API call needed
-      probablePitcher: pitcher
-        ? { name: pitcher.fullName, throws: pitcher.pitchHand?.code }
-        : null,
-    };
-  }
-
-  return {
-    player: {
-      id: player.id,
-      name: player.fullName,
-      team: player.currentTeam?.name ?? "Free Agent",
-      position,
-      bats: player.batSide?.code,
-    },
-    seasonStats: seasonStats?.[0]?.splits?.[0]?.stat ?? {},
-    recentLog: recentLog.slice(-7).map((g) => ({ date: g.date, opponent: g.opponent?.name, stat: g.stat })),
-    statcast: player.id ? (statcastCache[player.id] ?? null) : null,
-    todayGame: todayGameInfo,
-  };
+// Fetch weather for unique venues in parallel (fast, uses API key server-side)
+async function addWeather(playerDataList) {
+  const venues = [...new Set(playerDataList.map((pd) => pd.todayGame?.venue).filter(Boolean))];
+  const weatherMap = {};
+  await Promise.all(
+    venues.map(async (v) => {
+      weatherMap[v] = await getWeather(v).catch(() => null);
+    })
+  );
+  return playerDataList.map((pd) => ({
+    ...pd,
+    weather: pd.todayGame?.venue ? (weatherMap[pd.todayGame.venue] ?? null) : null,
+  }));
 }
 
 // ── Start / Sit ───────────────────────────────────────────────────────────────
-async function handleStartSit(players, roster, statcastCache) {
-  const schedule = await getTodayAndTomorrowSchedule().catch(() => ({ today: [], tomorrow: [] }));
-
-  // Fetch both players in parallel — light fetch only (~3 calls each)
-  const playerData = await Promise.all(
-    players.map((p) => fetchPlayerLight(p.name, schedule, statcastCache).catch((e) => ({ error: e.message, name: p.name })))
-  );
-
-  // Fetch weather for each player's venue in parallel
-  const enriched = await Promise.all(
-    playerData.map(async (pd) => {
-      if (pd.error) return pd;
-      const venue = pd.todayGame?.venue;
-      const weather = venue ? await getWeather(venue).catch(() => null) : null;
-      return { ...pd, weather };
-    })
-  );
+async function handleStartSit(playerData, roster, statcastCache) {
+  const withWeather = await addWeather(playerData);
+  const enriched = withWeather.map((pd) => ({
+    ...pd,
+    statcast: pd.player?.id ? (statcastCache[String(pd.player.id)] ?? null) : null,
+  }));
 
   const system = `${KENNY_VOICE}
 
@@ -140,34 +65,12 @@ End with a clear final verdict on who to start.`;
 
   return {
     system,
-    userMsg: `Compare these two players and tell me who to start: ${players.map((p) => p.name).join(" vs ")}`,
+    userMsg: `Compare these two players and tell me who to start: ${enriched.map((pd) => pd.player.name).join(" vs ")}`,
   };
 }
 
 // ── Trade ─────────────────────────────────────────────────────────────────────
-async function handleTrade(give, get, roster) {
-  const season = new Date().getFullYear();
-  const allPlayers = [...give, ...get];
-
-  const stats = await Promise.all(
-    allPlayers.map(async (p) => {
-      const found = await searchPlayer(p.name).catch(() => null);
-      if (!found) return { name: p.name, error: "not found" };
-      const position = found.primaryPosition?.abbreviation;
-      const seasonStats = await getSeasonStats(found.id, season, position).catch(() => []);
-      return {
-        name: found.fullName,
-        team: found.currentTeam?.name ?? "Free Agent",
-        position,
-        age: found.currentAge,
-        stats: seasonStats?.[0]?.splits?.[0]?.stat ?? {},
-      };
-    })
-  );
-
-  const giveData = stats.slice(0, give.length);
-  const getData = stats.slice(give.length);
-
+function handleTrade(giveData, getData, roster) {
   const system = `${KENNY_VOICE}
 
 <my_roster>${roster}</my_roster>
@@ -179,8 +82,8 @@ YOU GET: ${JSON.stringify(getData, null, 2)}
 Analyze: current season production, positional scarcity, age/trajectory, roster fit.
 End with a clear verdict: ACCEPT / DECLINE / COUNTER (and if counter, suggest what).`;
 
-  const giveNames = give.map((p) => p.name).join(", ");
-  const getNames = get.map((p) => p.name).join(", ");
+  const giveNames = giveData.map((d) => d.player.name).join(", ");
+  const getNames = getData.map((d) => d.player.name).join(", ");
   return {
     system,
     userMsg: `Analyze this trade: I give ${giveNames} — I get ${getNames}`,
@@ -188,18 +91,17 @@ End with a clear verdict: ACCEPT / DECLINE / COUNTER (and if counter, suggest wh
 }
 
 // ── Waiver Wire ───────────────────────────────────────────────────────────────
-async function handleWaiver(candidates, position, roster, statcastCache) {
-  const schedule = await getTodayAndTomorrowSchedule().catch(() => ({ today: [], tomorrow: [] }));
-
-  // Light fetch for each candidate — same fast path as start/sit
-  const playerData = await Promise.all(
-    candidates.map((p) => fetchPlayerLight(p.name, schedule, statcastCache).catch((e) => ({ error: e.message, name: p.name })))
-  );
+async function handleWaiver(playerData, position, roster, statcastCache) {
+  const withWeather = await addWeather(playerData);
+  const enriched = withWeather.map((pd) => ({
+    ...pd,
+    statcast: pd.player?.id ? (statcastCache[String(pd.player.id)] ?? null) : null,
+  }));
 
   const system = `${KENNY_VOICE}
 
 <my_roster>${roster}</my_roster>
-<waiver_candidates>${JSON.stringify(playerData, null, 2)}</waiver_candidates>
+<waiver_candidates>${JSON.stringify(enriched, null, 2)}</waiver_candidates>
 ${position ? `<target_position>${position}</target_position>` : ""}
 
 Rank each candidate with:
@@ -213,35 +115,15 @@ End with a clear #1 recommendation.`;
 
   return {
     system,
-    userMsg: `Rank these waiver wire candidates${position ? ` for ${position}` : ""}: ${candidates.map((p) => p.name).join(", ")}`,
+    userMsg: `Rank these waiver wire candidates${position ? ` for ${position}` : ""}: ${enriched.map((pd) => pd.player.name).join(", ")}`,
   };
 }
 
 // ── Roster Check ──────────────────────────────────────────────────────────────
-async function handleRosterCheck(roster) {
-  const season = new Date().getFullYear();
-  const players = parseRoster(roster);
-
-  const playerStats = await Promise.all(
-    players.map(async ({ slot, name }) => {
-      const found = await searchPlayer(name).catch(() => null);
-      if (!found) return { slot, name, error: "not found" };
-      const position = found.primaryPosition?.abbreviation;
-      const seasonStats = await getSeasonStats(found.id, season, position).catch(() => []);
-      return {
-        slot,
-        name: found.fullName,
-        team: found.currentTeam?.name ?? "Free Agent",
-        position,
-        age: found.currentAge,
-        stats: seasonStats?.[0]?.splits?.[0]?.stat ?? {},
-      };
-    })
-  );
-
+function handleRosterCheck(playerData, roster) {
   const system = `${KENNY_VOICE}
 
-<roster_data>${JSON.stringify(playerStats, null, 2)}</roster_data>
+<roster_data>${JSON.stringify(playerData, null, 2)}</roster_data>
 
 Conduct a full roster audit. Include:
 1. Grade each player A/B/C/D/F based on production vs positional average this season — one line each
@@ -263,34 +145,32 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "POST") return { statusCode: 405, body: "Method Not Allowed" };
 
   const body = JSON.parse(event.body || "{}");
-  const { mode, roster } = body;
+  const { mode, roster, playerData, giveData, getData, position } = body;
 
   try {
-    const statcastCache = (mode === "start-sit" || mode === "waiver") ? loadStatcast() : {};
+    const statcastCache =
+      mode === "start-sit" || mode === "waiver" ? loadStatcast() : {};
     let systemPrompt, userMsg;
 
     switch (mode) {
       case "start-sit": {
-        const { players } = body;
-        if (!players?.length) return { statusCode: 400, body: JSON.stringify({ error: "Provide 2 players" }) };
-        ({ system: systemPrompt, userMsg } = await handleStartSit(players, roster, statcastCache));
+        if (!playerData?.length) return { statusCode: 400, body: JSON.stringify({ error: "No player data provided" }) };
+        ({ system: systemPrompt, userMsg } = await handleStartSit(playerData, roster, statcastCache));
         break;
       }
       case "trade": {
-        const { give, get } = body;
-        if (!give?.length || !get?.length) return { statusCode: 400, body: JSON.stringify({ error: "Provide players for both sides" }) };
-        ({ system: systemPrompt, userMsg } = await handleTrade(give, get, roster));
+        if (!giveData?.length || !getData?.length) return { statusCode: 400, body: JSON.stringify({ error: "Provide players for both sides" }) };
+        ({ system: systemPrompt, userMsg } = handleTrade(giveData, getData, roster));
         break;
       }
       case "waiver": {
-        const { candidates, position } = body;
-        if (!candidates?.length) return { statusCode: 400, body: JSON.stringify({ error: "Add at least one candidate" }) };
-        ({ system: systemPrompt, userMsg } = await handleWaiver(candidates, position, roster, statcastCache));
+        if (!playerData?.length) return { statusCode: 400, body: JSON.stringify({ error: "No candidates provided" }) };
+        ({ system: systemPrompt, userMsg } = await handleWaiver(playerData, position, roster, statcastCache));
         break;
       }
       case "roster-check": {
-        if (!roster) return { statusCode: 400, body: JSON.stringify({ error: "No roster found — build your team first" }) };
-        ({ system: systemPrompt, userMsg } = await handleRosterCheck(roster));
+        if (!playerData?.length) return { statusCode: 400, body: JSON.stringify({ error: "No roster data provided" }) };
+        ({ system: systemPrompt, userMsg } = handleRosterCheck(playerData, roster));
         break;
       }
       default:

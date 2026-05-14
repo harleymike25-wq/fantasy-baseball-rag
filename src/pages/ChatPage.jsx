@@ -3,6 +3,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ChatWindow from "../components/ChatWindow";
 import PlayerSearch from "../components/PlayerSearch";
+import {
+  buildPlayerData,
+  getSeasonStats,
+  getTodayAndTomorrowSchedule,
+} from "../lib/mlbClient";
 
 const MODES = [
   { id: "start-sit", label: "Start / Sit" },
@@ -44,6 +49,7 @@ export default function ChatPage({ rosterSummary, roster }) {
   const [mode, setMode] = useState("start-sit");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingPhase, setLoadingPhase] = useState(null); // "fetching" | "generating"
   const [error, setError] = useState(null);
 
   // Start/Sit
@@ -72,42 +78,96 @@ export default function ChatPage({ rosterSummary, roster }) {
   // ── Structured analyze ────────────────────────────────────────────────────
   async function runAnalysis(payload) {
     setLoading(true);
+    setLoadingPhase("fetching");
     setResult(null);
     setError(null);
 
-    const timeoutMs = payload.mode === "roster-check" ? 28000 : 16000;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, roster: rosterSummary }),
-        signal: controller.signal,
-      });
+      // ── Phase 1: fetch MLB data in the browser (no Netlify timeout) ──
+      let fetchedData = {};
 
-      // Non-JSON response means Netlify returned an error/timeout page
-      const ct = res.headers.get("content-type") ?? "";
-      if (!ct.includes("application/json")) {
-        throw new Error(
-          `Server error (${res.status}) — analysis may have timed out. Try again.`
+      if (payload.mode === "start-sit") {
+        const schedule = await getTodayAndTomorrowSchedule();
+        const playerData = await Promise.all(
+          payload.players.map((p) => buildPlayerData(p, schedule))
         );
+        fetchedData = { playerData };
+      } else if (payload.mode === "trade") {
+        const [giveData, getData] = await Promise.all([
+          Promise.all(
+            payload.give.map(async (p) => ({
+              player: p,
+              seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
+            }))
+          ),
+          Promise.all(
+            payload.get.map(async (p) => ({
+              player: p,
+              seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
+            }))
+          ),
+        ]);
+        fetchedData = { giveData, getData };
+      } else if (payload.mode === "waiver") {
+        const schedule = await getTodayAndTomorrowSchedule();
+        const playerData = await Promise.all(
+          payload.candidates.map((p) => buildPlayerData(p, schedule))
+        );
+        fetchedData = { playerData };
+      } else if (payload.mode === "roster-check") {
+        const rosterEntries = Object.entries(roster ?? {})
+          .filter(([, v]) => v?.player_name && v?.player_id)
+          .map(([key, v]) => ({
+            id: v.player_id,
+            name: v.player_name,
+            team: v.player_team,
+            position: v.player_position,
+            slot: key,
+          }));
+        const playerData = await Promise.all(
+          rosterEntries.map(async (p) => ({
+            slot: p.slot,
+            player: { id: p.id, name: p.name, team: p.team, position: p.position },
+            seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
+          }))
+        );
+        fetchedData = { playerData };
       }
 
+      // ── Phase 2: send pre-fetched data to Netlify — Claude call only (~4s) ──
+      setLoadingPhase("generating");
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      let res;
+      try {
+        res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, ...fetchedData, roster: rosterSummary }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        throw new Error(`Server error (${res.status}) — please try again.`);
+      }
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setResult(data.reply);
     } catch (err) {
       setError(
         err.name === "AbortError"
-          ? "Request timed out — try again or use fewer players."
+          ? "Analysis timed out — please try again."
           : err.message
       );
       setResult(null);
     } finally {
-      clearTimeout(timer);
       setLoading(false);
+      setLoadingPhase(null);
     }
   }
 
@@ -195,7 +255,9 @@ export default function ChatPage({ rosterSummary, roster }) {
         /* ── Loading spinner ── */
         <div className="analyze-loading">
           <div className="analyze-spinner" />
-          <span>{loadingMessages[mode]}</span>
+          <span>
+            {loadingPhase === "fetching" ? "Fetching player data…" : "Generating analysis…"}
+          </span>
         </div>
 
       ) : result ? (
