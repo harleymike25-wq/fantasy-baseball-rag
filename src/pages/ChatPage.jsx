@@ -8,6 +8,12 @@ import {
   getSeasonStats,
   getTodayAndTomorrowSchedule,
 } from "../lib/mlbClient";
+import {
+  buildStartSitRequest,
+  buildTradeRequest,
+  buildWaiverRequest,
+  buildRosterCheckRequest,
+} from "../lib/analyst";
 
 const MODES = [
   { id: "start-sit", label: "Start / Sit" },
@@ -134,17 +140,28 @@ export default function ChatPage({ rosterSummary, roster }) {
         fetchedData = { playerData };
       }
 
-      // ── Phase 2: send pre-fetched data to Netlify — Claude call only (~4s) ──
+      // ── Phase 2: build Anthropic request in browser, send to minimal proxy ──
       setLoadingPhase("generating");
+
+      let request;
+      if (payload.mode === "start-sit") {
+        request = buildStartSitRequest(fetchedData.playerData, rosterSummary);
+      } else if (payload.mode === "trade") {
+        request = buildTradeRequest(fetchedData.giveData, fetchedData.getData, rosterSummary);
+      } else if (payload.mode === "waiver") {
+        request = buildWaiverRequest(fetchedData.playerData, payload.position, rosterSummary);
+      } else if (payload.mode === "roster-check") {
+        request = buildRosterCheckRequest(fetchedData.playerData, rosterSummary);
+      }
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 12000);
       let res;
       try {
-        res = await fetch("/api/analyze", {
+        res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...payload, ...fetchedData, roster: rosterSummary }),
+          body: JSON.stringify(request),
           signal: controller.signal,
         });
       } finally {
