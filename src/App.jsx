@@ -1,60 +1,45 @@
 import { useState } from "react";
-import { useTeam } from "./hooks/useTeam";
-import RosterPage from "./pages/RosterPage";
-import ChatPage from "./pages/ChatPage";
+import CabinetPage from "./pages/CabinetPage";
+import SuggestPage from "./pages/SuggestPage";
+import SetupPage from "./pages/SetupPage";
+import { useCabinet } from "./hooks/useCabinet";
 import "./App.css";
 
-function App() {
-  const [tab, setTab] = useState("chat");
-  const teamHook = useTeam();
-  const { teams, activeTeamId, setActiveTeamId } = teamHook;
-  const activeTeam = teams.find((t) => t.id === activeTeamId);
+const TABS = [
+  { id: "suggest", label: "Suggest" },
+  { id: "cabinet", label: "My Bottles" },
+  { id: "setup", label: "Setup" },
+];
+
+export default function App() {
+  const [tab, setTab] = useState("suggest");
+  const cabinet = useCabinet();
 
   return (
     <div className="app">
       <header className="header">
         <div className="header__brand">
-          <span>⚾</span>
-          <span>Fantasy Baseball AI</span>
+          <span>🥃</span>
+          <span>Cabinet</span>
         </div>
-
-        <div className="header__team-row">
-          {teams.length > 0 ? (
-            <select
-              value={activeTeamId ?? ""}
-              onChange={(e) => setActiveTeamId(e.target.value || null)}
-              className="header__team-select"
-            >
-              {!activeTeamId && <option value="">— select team —</option>}
-              {teams.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          ) : (
-            <span className="header__no-team">No teams yet</span>
-          )}
-        </div>
-
         <nav className="header__nav">
-          {["chat", "roster"].map((t) => (
+          {TABS.map((t) => (
             <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`nav-tab ${tab === t ? "nav-tab--active" : "nav-tab--inactive"}`}
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`nav-tab ${tab === t.id ? "nav-tab--active" : ""}`}
             >
-              {t === "roster" ? "My Team" : "Chat"}
+              {t.label}
             </button>
           ))}
         </nav>
       </header>
 
-      {tab === "roster" ? (
-        <RosterPage teamHook={teamHook} />
-      ) : (
-        <ChatPage rosterSummary={teamHook.getRosterSummary()} roster={teamHook.roster} />
-      )}
+      <div className="page">
+        {tab === "suggest" && <SuggestPage cabinet={cabinet.bottles} />}
+        {tab === "cabinet" && <CabinetPage cabinet={cabinet} />}
+        {tab === "setup" && <SetupPage />}
+      </div>
     </div>
   );
 }
-
-export default App;
