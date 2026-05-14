@@ -1,7 +1,6 @@
 const { default: Anthropic } = require("@anthropic-ai/sdk");
 const path = require("path");
 const fs = require("fs");
-const { getWeather } = require("./weather");
 
 const client = new Anthropic();
 
@@ -25,25 +24,9 @@ function loadStatcast() {
 
 const KENNY_VOICE = `You are Kenny Powers — the foul-mouthed, wildly overconfident, trash-talking former MLB pitcher from Eastbound & Down. You give expert fantasy baseball advice delivered exactly like Kenny Powers would: profane, self-aggrandizing, brutally honest, zero filter. Stay in character at all times. Never fabricate statistics — use only data provided to you.`;
 
-// Fetch weather for unique venues in parallel (fast, uses API key server-side)
-async function addWeather(playerDataList) {
-  const venues = [...new Set(playerDataList.map((pd) => pd.todayGame?.venue).filter(Boolean))];
-  const weatherMap = {};
-  await Promise.all(
-    venues.map(async (v) => {
-      weatherMap[v] = await getWeather(v).catch(() => null);
-    })
-  );
-  return playerDataList.map((pd) => ({
-    ...pd,
-    weather: pd.todayGame?.venue ? (weatherMap[pd.todayGame.venue] ?? null) : null,
-  }));
-}
-
 // ── Start / Sit ───────────────────────────────────────────────────────────────
-async function handleStartSit(playerData, roster, statcastCache) {
-  const withWeather = await addWeather(playerData);
-  const enriched = withWeather.map((pd) => ({
+function handleStartSit(playerData, roster, statcastCache) {
+  const enriched = playerData.map((pd) => ({
     ...pd,
     statcast: pd.player?.id ? (statcastCache[String(pd.player.id)] ?? null) : null,
   }));
@@ -91,9 +74,8 @@ End with a clear verdict: ACCEPT / DECLINE / COUNTER (and if counter, suggest wh
 }
 
 // ── Waiver Wire ───────────────────────────────────────────────────────────────
-async function handleWaiver(playerData, position, roster, statcastCache) {
-  const withWeather = await addWeather(playerData);
-  const enriched = withWeather.map((pd) => ({
+function handleWaiver(playerData, position, roster, statcastCache) {
+  const enriched = playerData.map((pd) => ({
     ...pd,
     statcast: pd.player?.id ? (statcastCache[String(pd.player.id)] ?? null) : null,
   }));
@@ -155,7 +137,7 @@ exports.handler = async (event) => {
     switch (mode) {
       case "start-sit": {
         if (!playerData?.length) return { statusCode: 400, body: JSON.stringify({ error: "No player data provided" }) };
-        ({ system: systemPrompt, userMsg } = await handleStartSit(playerData, roster, statcastCache));
+        ({ system: systemPrompt, userMsg } = handleStartSit(playerData, roster, statcastCache));
         break;
       }
       case "trade": {
@@ -165,7 +147,7 @@ exports.handler = async (event) => {
       }
       case "waiver": {
         if (!playerData?.length) return { statusCode: 400, body: JSON.stringify({ error: "No candidates provided" }) };
-        ({ system: systemPrompt, userMsg } = await handleWaiver(playerData, position, roster, statcastCache));
+        ({ system: systemPrompt, userMsg } = handleWaiver(playerData, position, roster, statcastCache));
         break;
       }
       case "roster-check": {
