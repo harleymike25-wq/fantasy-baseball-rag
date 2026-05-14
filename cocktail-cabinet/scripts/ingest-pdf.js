@@ -60,8 +60,9 @@ async function ingest() {
   const text = response.content[0].text.trim();
   let recipes;
   try {
-    const match = text.match(/\[[\s\S]*\]/);
-    recipes = JSON.parse(match ? match[0] : text);
+    const stripped = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```\s*$/m, '');
+    const match = stripped.match(/\[[\s\S]*\]/);
+    recipes = JSON.parse(match ? match[0] : stripped);
   } catch (err) {
     console.error("Failed to parse Claude's response:", err.message);
     console.error("Raw (first 500 chars):", text.slice(0, 500));
