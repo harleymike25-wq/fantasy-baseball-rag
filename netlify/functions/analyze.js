@@ -62,7 +62,8 @@ YOU GIVE: ${JSON.stringify(giveData, null, 2)}
 YOU GET: ${JSON.stringify(getData, null, 2)}
 </trade>
 
-Analyze: current season production, positional scarcity, age/trajectory, roster fit.
+REDRAFT LEAGUE — no keeper value, no age talk, no dynasty framing. This season's production only.
+Analyze: current season stats, recent trend (resurgence or slump), positional scarcity, roster fit for the rest of this season.
 End with a clear verdict: ACCEPT / DECLINE / COUNTER (and if counter, suggest what).`;
 
   const giveNames = giveData.map((d) => d.player.name).join(", ");

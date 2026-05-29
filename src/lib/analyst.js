@@ -61,12 +61,14 @@ export function buildTradeRequest(giveData, getData, roster) {
 <give>${JSON.stringify(give, null, 2)}</give>
 <get>${JSON.stringify(get, null, 2)}</get>
 
-THIS SEASON STATS ONLY. For each player:
-1. 📊 Current season production (use seasonStats)
-2. 🔥 Recent form: last 14 games — hot streak, cold slump, or steady?
-3. 📈 Trend: compare recent output rate vs season average. Call out second-half resurgence or slump explicitly.
-4. Positional value + roster fit
-5. Buy-high / sell-high risk?
+REDRAFT LEAGUE. This season's production is all that matters — no keeper value, no age, no dynasty talk.
+
+For each player:
+1. 📊 Season stats: rate stats + counting stats pace
+2. 🔥 Last 14 games: hot, cold, or steady? Cite specifics from the game log
+3. 📈 Trend vs season average: is this a second-half resurgence or a slump? Explicitly say which
+4. Positional scarcity + roster fit for the rest of THIS season
+5. Buy-high / sell-high risk based on recent trend
 
 End with ACCEPT / DECLINE / COUNTER verdict.`,
     messages: [{ role: "user", content: `Trade: I give ${giveData.map((d) => d.player.name).join(", ")} — I get ${getData.map((d) => d.player.name).join(", ")}` }],
