@@ -6,7 +6,6 @@ import PlayerSearch from "../components/PlayerSearch";
 import {
   buildPlayerData,
   getSeasonStats,
-  getGameLog,
   getTodayAndTomorrowSchedule,
 } from "../lib/mlbClient";
 import {
@@ -100,16 +99,19 @@ export default function ChatPage({ rosterSummary, roster }) {
         );
         fetchedData = { playerData };
       } else if (payload.mode === "trade") {
-        const fetchTradePlayer = async (p) => {
-          const [seasonStats, recentLog] = await Promise.all([
-            getSeasonStats(p.id, p.position).catch(() => ({})),
-            getGameLog(p.id, 20).catch(() => []),
-          ]);
-          return { player: p, seasonStats, recentLog };
-        };
         const [giveData, getData] = await Promise.all([
-          Promise.all(payload.give.map(fetchTradePlayer)),
-          Promise.all(payload.get.map(fetchTradePlayer)),
+          Promise.all(
+            payload.give.map(async (p) => ({
+              player: p,
+              seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
+            }))
+          ),
+          Promise.all(
+            payload.get.map(async (p) => ({
+              player: p,
+              seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
+            }))
+          ),
         ]);
         fetchedData = { giveData, getData };
       } else if (payload.mode === "waiver") {

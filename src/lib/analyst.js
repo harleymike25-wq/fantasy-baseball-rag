@@ -28,47 +28,21 @@ export function buildStartSitRequest(playerData, roster) {
   };
 }
 
-function trimTradeLog(log = []) {
-  return log.slice(-7).map((g) => ({
-    date: g.date,
-    opp: g.opponent,
-    stat: g.stat
-      ? {
-          H: g.stat.hits, AB: g.stat.atBats,
-          HR: g.stat.homeRuns, RBI: g.stat.rbi,
-          K: g.stat.strikeOuts, BB: g.stat.baseOnBalls,
-          IP: g.stat.inningsPitched, ER: g.stat.earnedRuns,
-        }
-      : {},
-  }));
-}
-
 export function buildTradeRequest(giveData, getData, roster) {
-  const shape = (players) =>
-    players.map((p) => ({
-      player: p.player,
-      seasonStats: p.seasonStats,
-      last7Games: trimTradeLog(p.recentLog),
-    }));
-
-  const give = shape(giveData);
-  const get = shape(getData);
-
   return {
     system: `${KENNY}
 
 <roster>${roster || "none"}</roster>
-<give>${JSON.stringify(give, null, 2)}</give>
-<get>${JSON.stringify(get, null, 2)}</get>
+<give>${JSON.stringify(giveData, null, 2)}</give>
+<get>${JSON.stringify(getData, null, 2)}</get>
 
-REDRAFT LEAGUE. This season's production is all that matters — no keeper value, no age, no dynasty talk.
+REDRAFT LEAGUE. Use only the season stats provided. No keeper value, no age talk.
 
 For each player:
-1. 📊 Season stats: rate stats + counting stats pace
-2. 🔥 Last 7 games: hot, cold, or steady? Cite specifics from the game log
-3. 📈 Trend vs season average: resurgence or slump? Explicitly say which
+1. 📊 Season production vs typical MLB averages at their position — are they above, at, or below the pro baseline?
+2. 📈 First-half vs second-half tendencies — based on their stats and known player patterns, are they a known H1 or H2 performer? Flag any typical second-half regression or resurgence risk.
+3. 🔢 Rate stat trajectory — are counting stats on pace for a full-season projection that holds up, or is there regression baked in?
 4. Positional scarcity + roster fit for the rest of THIS season
-5. Buy-high / sell-high risk based on recent trend
 
 End with ACCEPT / DECLINE / COUNTER verdict.`,
     messages: [{ role: "user", content: `Trade: I give ${giveData.map((d) => d.player.name).join(", ")} — I get ${getData.map((d) => d.player.name).join(", ")}` }],
