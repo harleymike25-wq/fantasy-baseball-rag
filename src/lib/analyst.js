@@ -28,9 +28,47 @@ export function buildStartSitRequest(playerData, roster) {
   };
 }
 
+function trimTradeLog(log = []) {
+  return log.slice(-14).map((g) => ({
+    date: g.date,
+    opp: g.opponent,
+    stat: g.stat
+      ? {
+          H: g.stat.hits, AB: g.stat.atBats,
+          HR: g.stat.homeRuns, RBI: g.stat.rbi,
+          K: g.stat.strikeOuts, BB: g.stat.baseOnBalls,
+          IP: g.stat.inningsPitched, ER: g.stat.earnedRuns,
+        }
+      : {},
+  }));
+}
+
 export function buildTradeRequest(giveData, getData, roster) {
+  const shape = (players) =>
+    players.map((p) => ({
+      player: p.player,
+      seasonStats: p.seasonStats,
+      last14Games: trimTradeLog(p.recentLog),
+    }));
+
+  const give = shape(giveData);
+  const get = shape(getData);
+
   return {
-    system: `${KENNY}\n\n<roster>${roster || "none"}</roster>\n<give>${JSON.stringify(giveData, null, 2)}</give>\n<get>${JSON.stringify(getData, null, 2)}</get>\n\nAnalyze production, positional value, age/trajectory, roster fit. Give a clear ACCEPT / DECLINE / COUNTER verdict.`,
+    system: `${KENNY}
+
+<roster>${roster || "none"}</roster>
+<give>${JSON.stringify(give, null, 2)}</give>
+<get>${JSON.stringify(get, null, 2)}</get>
+
+THIS SEASON STATS ONLY. For each player:
+1. 📊 Current season production (use seasonStats)
+2. 🔥 Recent form: last 14 games — hot streak, cold slump, or steady?
+3. 📈 Trend: compare recent output rate vs season average. Call out second-half resurgence or slump explicitly.
+4. Positional value + roster fit
+5. Buy-high / sell-high risk?
+
+End with ACCEPT / DECLINE / COUNTER verdict.`,
     messages: [{ role: "user", content: `Trade: I give ${giveData.map((d) => d.player.name).join(", ")} — I get ${getData.map((d) => d.player.name).join(", ")}` }],
   };
 }

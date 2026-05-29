@@ -6,6 +6,7 @@ import PlayerSearch from "../components/PlayerSearch";
 import {
   buildPlayerData,
   getSeasonStats,
+  getGameLog,
   getTodayAndTomorrowSchedule,
 } from "../lib/mlbClient";
 import {
@@ -104,12 +105,14 @@ export default function ChatPage({ rosterSummary, roster }) {
             payload.give.map(async (p) => ({
               player: p,
               seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
+              recentLog: await getGameLog(p.id, 20).catch(() => []),
             }))
           ),
           Promise.all(
             payload.get.map(async (p) => ({
               player: p,
               seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
+              recentLog: await getGameLog(p.id, 20).catch(() => []),
             }))
           ),
         ]);
