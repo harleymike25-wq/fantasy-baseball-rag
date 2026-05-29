@@ -29,7 +29,7 @@ export function buildStartSitRequest(playerData, roster) {
 }
 
 function trimTradeLog(log = []) {
-  return log.slice(-14).map((g) => ({
+  return log.slice(-7).map((g) => ({
     date: g.date,
     opp: g.opponent,
     stat: g.stat
@@ -48,7 +48,7 @@ export function buildTradeRequest(giveData, getData, roster) {
     players.map((p) => ({
       player: p.player,
       seasonStats: p.seasonStats,
-      last14Games: trimTradeLog(p.recentLog),
+      last7Games: trimTradeLog(p.recentLog),
     }));
 
   const give = shape(giveData);
@@ -65,8 +65,8 @@ REDRAFT LEAGUE. This season's production is all that matters — no keeper value
 
 For each player:
 1. 📊 Season stats: rate stats + counting stats pace
-2. 🔥 Last 14 games: hot, cold, or steady? Cite specifics from the game log
-3. 📈 Trend vs season average: is this a second-half resurgence or a slump? Explicitly say which
+2. 🔥 Last 7 games: hot, cold, or steady? Cite specifics from the game log
+3. 📈 Trend vs season average: resurgence or slump? Explicitly say which
 4. Positional scarcity + roster fit for the rest of THIS season
 5. Buy-high / sell-high risk based on recent trend
 
