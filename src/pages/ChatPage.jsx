@@ -100,21 +100,16 @@ export default function ChatPage({ rosterSummary, roster }) {
         );
         fetchedData = { playerData };
       } else if (payload.mode === "trade") {
+        const fetchTradePlayer = async (p) => {
+          const [seasonStats, recentLog] = await Promise.all([
+            getSeasonStats(p.id, p.position).catch(() => ({})),
+            getGameLog(p.id, 20).catch(() => []),
+          ]);
+          return { player: p, seasonStats, recentLog };
+        };
         const [giveData, getData] = await Promise.all([
-          Promise.all(
-            payload.give.map(async (p) => ({
-              player: p,
-              seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
-              recentLog: await getGameLog(p.id, 20).catch(() => []),
-            }))
-          ),
-          Promise.all(
-            payload.get.map(async (p) => ({
-              player: p,
-              seasonStats: await getSeasonStats(p.id, p.position).catch(() => ({})),
-              recentLog: await getGameLog(p.id, 20).catch(() => []),
-            }))
-          ),
+          Promise.all(payload.give.map(fetchTradePlayer)),
+          Promise.all(payload.get.map(fetchTradePlayer)),
         ]);
         fetchedData = { giveData, getData };
       } else if (payload.mode === "waiver") {
@@ -158,7 +153,7 @@ export default function ChatPage({ rosterSummary, roster }) {
       }
 
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 12000);
+      const timer = setTimeout(() => controller.abort(), 25000);
       let res;
       try {
         res = await fetch("/api/generate", {
