@@ -15,12 +15,12 @@ export async function getSeasonStats(playerId, position) {
   return data.stats?.[0]?.splits?.[0]?.stat ?? {};
 }
 
-export async function getGameLog(playerId) {
+export async function getGameLog(playerId, numGames = 7) {
   const season = new Date().getFullYear();
   const data = await mlbGet(
     `/people/${playerId}/stats?stats=gameLog&season=${season}&sportId=1&group=hitting,pitching`
   );
-  return (data.stats?.[0]?.splits ?? []).slice(-7).map((g) => ({
+  return (data.stats?.[0]?.splits ?? []).slice(-numGames).map((g) => ({
     date: g.date,
     opponent: g.opponent?.name,
     stat: g.stat,

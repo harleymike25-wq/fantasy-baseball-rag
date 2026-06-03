@@ -155,7 +155,7 @@ export default function ChatPage({ rosterSummary, roster }) {
       }
 
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 12000);
+      const timer = setTimeout(() => controller.abort(), 25000);
       let res;
       try {
         res = await fetch("/api/generate", {

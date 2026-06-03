@@ -58,7 +58,7 @@ export default function PlayerSearch({ onSelect, placeholder = "Search player...
           borderRadius: 6,
           padding: "4px 8px",
           color: "#e2e8f0",
-          fontSize: 13,
+          fontSize: 16,
           outline: "none",
         }}
         onFocus={() => results.length && setOpen(true)}

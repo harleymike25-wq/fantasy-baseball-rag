@@ -30,7 +30,21 @@ export function buildStartSitRequest(playerData, roster) {
 
 export function buildTradeRequest(giveData, getData, roster) {
   return {
-    system: `${KENNY}\n\n<roster>${roster || "none"}</roster>\n<give>${JSON.stringify(giveData, null, 2)}</give>\n<get>${JSON.stringify(getData, null, 2)}</get>\n\nAnalyze production, positional value, age/trajectory, roster fit. Give a clear ACCEPT / DECLINE / COUNTER verdict.`,
+    system: `${KENNY}
+
+<roster>${roster || "none"}</roster>
+<give>${JSON.stringify(giveData, null, 2)}</give>
+<get>${JSON.stringify(getData, null, 2)}</get>
+
+REDRAFT LEAGUE. Use only the season stats provided. No keeper value, no age talk.
+
+For each player:
+1. 📊 Season production vs typical MLB averages at their position — are they above, at, or below the pro baseline?
+2. 📈 First-half vs second-half tendencies — based on their stats and known player patterns, are they a known H1 or H2 performer? Flag any typical second-half regression or resurgence risk.
+3. 🔢 Rate stat trajectory — are counting stats on pace for a full-season projection that holds up, or is there regression baked in?
+4. Positional scarcity + roster fit for the rest of THIS season
+
+End with ACCEPT / DECLINE / COUNTER verdict.`,
     messages: [{ role: "user", content: `Trade: I give ${giveData.map((d) => d.player.name).join(", ")} — I get ${getData.map((d) => d.player.name).join(", ")}` }],
   };
 }

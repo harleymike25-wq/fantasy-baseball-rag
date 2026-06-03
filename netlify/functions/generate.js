@@ -13,7 +13,7 @@ exports.handler = async (event) => {
   try {
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 900,
+      max_tokens: 1100,
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages,
     });

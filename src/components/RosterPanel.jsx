@@ -50,7 +50,7 @@ export default function RosterPanel({ onSendRoster }) {
               borderRadius: 8,
               padding: "6px 12px",
               color: "#e2e8f0",
-              fontSize: 13,
+              fontSize: 16,
               outline: "none",
             }}
           />
